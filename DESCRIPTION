@@ -1,0 +1,24 @@
+Package: chatlens
+Type: Package
+Title: Analyze and Anonymize Chat Exports
+Version: 0.1.0
+Author: Hugo Teixeira [aut, cre]
+Maintainer: Hugo Teixeira <hugo@example.com>
+Authors@R: c(
+    person(
+      "Hugo", "Teixeira",
+      email = "hugo@example.com",
+      role = c("aut", "cre")
+    )
+  )
+Description: Import WhatsApp Android chat exports, anonymize participants,
+    transcribe audio, describe images, and assemble period-based text for analysis.
+License: GPL-3
+Encoding: UTF-8
+Imports:
+    genflow,
+    jsonlite
+Suggests:
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+RoxygenNote: 7.3.2
