@@ -1,8 +1,8 @@
 make_chat <- function(df, source = list(tz = "UTC", store_dir = tempfile("chatlens_store_"))) {
-  chatlens:::new_chatlens_chat(df, source = source, chat_key = "chat")
+  chatlens:::.clh_new_chat(df, source = source, chat_key = "chat")
 }
 
-test_that("period slicing handles empty chat rows without error", {
+test_that("analysis preparation handles empty chat rows without error", {
   df <- data.frame(
     timestamp = as.POSIXct(character(0), tz = "UTC"),
     sender = character(0),
@@ -11,12 +11,13 @@ test_that("period slicing handles empty chat rows without error", {
   )
   chat <- make_chat(df)
 
-  periods <- cl_chat_split_periods(chat, period = c("year", "month", "week", "day"))
-  expect_s3_class(periods, "data.frame")
-  expect_equal(nrow(periods), 0)
+  prepared <- cl_prepare_analysis(chat, period = "day", save = FALSE)
+  expect_s3_class(prepared, "data.frame")
+  expect_s3_class(prepared, "chatlens_analysis_input")
+  expect_equal(nrow(prepared), 0)
 })
 
-test_that("period slicing drops NA timestamps for time periods", {
+test_that("analysis preparation drops NA timestamps for time periods", {
   df <- data.frame(
     timestamp = as.POSIXct(c(NA, NA), tz = "UTC"),
     sender = c("A", "B"),
@@ -25,8 +26,8 @@ test_that("period slicing drops NA timestamps for time periods", {
   )
   chat <- make_chat(df)
 
-  periods <- cl_chat_split_periods(chat, period = c("year", "week", "day"))
-  expect_equal(nrow(periods), 0)
+  prepared <- cl_prepare_analysis(chat, period = "week", save = FALSE)
+  expect_equal(nrow(prepared), 0)
 })
 
 test_that("week period uses ISO year-week keys", {
@@ -38,6 +39,6 @@ test_that("week period uses ISO year-week keys", {
   )
   chat <- make_chat(df)
 
-  periods <- cl_chat_split_periods(chat, period = "week")
-  expect_equal(periods$key, "2025-W01")
+  prepared <- cl_prepare_analysis(chat, period = "week", save = FALSE)
+  expect_equal(prepared$key, "2025-W01")
 })

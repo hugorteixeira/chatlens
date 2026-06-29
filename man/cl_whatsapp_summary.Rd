@@ -7,13 +7,13 @@
 cl_whatsapp_summary(chat = NULL, path = NULL, ask_confirmation = FALSE, ...)
 }
 \arguments{
-\item{chat}{A `chatlens_chat` object}
+\item{chat}{A \code{chatlens_chat} object}
 
 \item{path}{Optional ZIP path to import and then summarize}
 
 \item{ask_confirmation}{Ask to confirm detected chat file}
 
-\item{...}{Additional arguments passed to [cl_whatsapp_import()]}
+\item{...}{Additional arguments passed to \code{\link[=cl_whatsapp_import]{cl_whatsapp_import()}}}
 }
 \description{
 Summarize an imported WhatsApp chat

@@ -9,19 +9,25 @@ cl_chat_anonymize(
   alias_map = NULL,
   interactive = FALSE,
   save_original = TRUE,
-  cache_dir = cl_cache_dir()
+  save_chat = TRUE,
+  cache_dir = NULL
 )
 }
 \arguments{
-\item{chat}{A chatlens_chat}
+\item{chat}{A \code{chatlens_chat} object}
 
 \item{alias_map}{Alias map (optional)}
 
 \item{interactive}{Prompt for aliases}
 
-\item{save_original}{Save a copy of the original chat in cache}
+\item{save_original}{Save a copy of the original chat in cache as \code{.rds}
+plus a mirrored \code{.txt} transcript}
 
-\item{cache_dir}{Cache directory}
+\item{save_chat}{Save the current chat state in cache as \code{chat.rds} plus a
+mirrored \code{chat.txt} transcript}
+
+\item{cache_dir}{Optional cache directory. When \code{NULL}, uses the chat's
+stored cache location or \verb{~/.chatlens}.}
 }
 \description{
 Anonymize a chat using an alias map

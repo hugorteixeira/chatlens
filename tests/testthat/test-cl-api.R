@@ -1,136 +1,223 @@
 test_that("cl wrappers map to core functions", {
-  expect_true(dir.exists(cl_cache_dir()))
+  expect_true(dir.exists(chatlens:::.clh_cache_dir()))
+  expect_equal(chatlens:::.clh_cache_dir(NULL), chatlens:::.clh_cache_dir())
+  custom_cache <- tempfile("chatlens_cache_")
+  on.exit(unlink(custom_cache, recursive = TRUE), add = TRUE)
+  expect_equal(chatlens:::.clh_cache_dir(custom_cache), path.expand(custom_cache))
+  expect_true(dir.exists(custom_cache))
   expect_type(cl_whatsapp_import, "closure")
 })
 
-test_that("period API returns period columns", {
-  df <- data.frame(
-    timestamp = as.POSIXct("2025-01-01 10:00:00", tz = "UTC"),
-    sender = "A",
-    text = "hello",
-    stringsAsFactors = FALSE
-  )
-  chat <- chatlens:::new_chatlens_chat(df, source = list(tz = "UTC", store_dir = tempfile("cl_store_")))
-
-  periods <- cl_chat_split_periods(chat, period = c("all", "day"))
-  expect_true("period" %in% names(periods))
-  expect_true("period" %in% names(periods))
-
-  selected <- cl_periods_select(periods, select = "day", data_type = "default")
-  expect_true(all(selected$period == "day"))
-})
-
-test_that("cl_chat_filter_period filters by day key", {
+test_that(".clh_chat_filter_period filters by day key", {
   df <- data.frame(
     timestamp = as.POSIXct(c("2025-01-01 10:00:00", "2025-01-02 10:00:00"), tz = "UTC"),
     sender = c("A", "B"),
     text = c("one", "two"),
     stringsAsFactors = FALSE
   )
-  chat <- chatlens:::new_chatlens_chat(df, source = list(tz = "UTC"))
+  chat <- chatlens:::.clh_new_chat(df, source = list(tz = "UTC"))
 
-  filtered <- cl_chat_filter_period(chat, period = "day", key = "2025-01-01")
+  filtered <- chatlens:::.clh_chat_filter_period(chat, period = "day", key = "2025-01-01")
   expect_equal(nrow(filtered), 1)
   expect_equal(filtered$text, "one")
 })
 
-test_that("cl_periods_select accepts chat + period alias", {
+test_that("cl_prepare_analysis saves all-chat input under analysis/all", {
+  cache_dir <- tempfile("chatlens_cache_")
+  on.exit(unlink(cache_dir, recursive = TRUE), add = TRUE)
+
   df <- data.frame(
-    timestamp = as.POSIXct(c("2025-01-01 10:00:00", "2025-01-02 10:00:00"), tz = "UTC"),
-    sender = c("A", "B"),
+    timestamp = as.POSIXct(c("2025-01-01 10:00:00", "2025-01-01 10:01:00"), tz = "UTC"),
+    sender = c("Alice", "Alice"),
     text = c("one", "two"),
+    text_enriched = c("one", "two"),
     stringsAsFactors = FALSE
   )
-  chat <- chatlens:::new_chatlens_chat(df, source = list(tz = "UTC"))
+  chat <- chatlens:::.clh_new_chat(df, source = list(tz = "UTC"), chat_key = "prepare_all")
 
-  p1 <- cl_periods_select(chat, period = "all", data_type = "default")
-  expect_equal(nrow(p1), 1)
-  expect_equal(p1$period, "all")
+  prepared <- cl_prepare_analysis(chat, cache_dir = cache_dir)
+  store <- chatlens:::.clh_chat_store_dir("prepare_all", cache_dir = cache_dir)
+  input_dir <- file.path(store, "analysis", "all")
 
-  p2 <- cl_periods_select(chat, select = "day", data_type = "default")
-  expect_true(all(p2$period == "day"))
+  expect_s3_class(prepared, "chatlens_analysis_input")
+  expect_equal(nrow(prepared), 1)
+  expect_equal(prepared$period, "all")
+  expect_equal(prepared$key, "all")
+  expect_equal(prepared$input_dir, input_dir)
+  expect_true(file.exists(file.path(input_dir, "input.txt")))
+  expect_true(file.exists(file.path(input_dir, "input.rds")))
+
+  txt <- paste(readLines(file.path(input_dir, "input.txt"), warn = FALSE), collapse = "\n")
+  expect_true(grepl("10:00 Alice\none\ntwo", txt, fixed = TRUE))
+  expect_false(grepl("2025-01-01 10:00:00 - Alice", txt, fixed = TRUE))
 })
 
-test_that("cl_periods_select supports chat selectors by key and row index", {
+test_that("cl_prepare_analysis day selection writes one input per selected day", {
+  cache_dir <- tempfile("chatlens_cache_")
+  on.exit(unlink(cache_dir, recursive = TRUE), add = TRUE)
+
   df <- data.frame(
-    timestamp = as.POSIXct(c("2025-01-01 10:00:00", "2025-01-02 10:00:00"), tz = "UTC"),
-    sender = c("A", "B"),
-    text = c("one", "two"),
+    timestamp = as.POSIXct(
+      c("2020-10-01 09:00:00", "2020-10-02 09:00:00", "2020-11-01 09:00:00"),
+      tz = "UTC"
+    ),
+    sender = c("Alice", "Bob", "Alice"),
+    text = c("oct one", "oct two", "nov one"),
+    text_enriched = c("oct one", "oct two", "nov one"),
     stringsAsFactors = FALSE
   )
-  chat <- chatlens:::new_chatlens_chat(df, source = list(tz = "UTC"))
+  chat <- chatlens:::.clh_new_chat(df, source = list(tz = "UTC"), chat_key = "prepare_days")
 
-  by_key <- cl_periods_select(chat, select = "2025-01-01", data_type = "default")
-  expect_equal(nrow(by_key), 1)
-  expect_equal(by_key$period, "day")
-  expect_equal(by_key$key, "2025-01-01")
+  prepared <- cl_prepare_analysis(
+    chat,
+    period = "day",
+    select = "2020-10",
+    cache_dir = cache_dir
+  )
+  store <- chatlens:::.clh_chat_store_dir("prepare_days", cache_dir = cache_dir)
 
-  by_index <- cl_periods_select(chat, select = 1, data_type = "default")
-  expect_equal(nrow(by_index), 1)
+  expect_equal(prepared$key, c("2020-10-01", "2020-10-02"))
+  expect_true(file.exists(file.path(store, "analysis", "by_day", "2020", "10", "01", "input.txt")))
+  expect_true(file.exists(file.path(store, "analysis", "by_day", "2020", "10", "02", "input.txt")))
+  expect_false(dir.exists(file.path(store, "analysis", "by_day", "2020", "11", "01")))
 })
 
-test_that("cl_periods_select default returns selected rows", {
+test_that("cl_prepare_analysis explicit cache_dir overrides stored chat location", {
+  source_store <- tempfile("chatlens_source_store_")
+  cache_dir <- tempfile("chatlens_cache_")
+  on.exit(unlink(source_store, recursive = TRUE), add = TRUE)
+  on.exit(unlink(cache_dir, recursive = TRUE), add = TRUE)
+
   df <- data.frame(
-    timestamp = as.POSIXct(c("2025-01-01 10:00:00", "2025-01-02 10:00:00"), tz = "UTC"),
-    sender = c("A", "B"),
-    text = c("one", "two"),
+    timestamp = as.POSIXct("2025-01-01 10:00:00", tz = "UTC"),
+    sender = "Alice",
+    text = "hello",
+    text_enriched = "hello",
     stringsAsFactors = FALSE
   )
-  chat <- chatlens:::new_chatlens_chat(df, source = list(tz = "UTC"))
-  out <- cl_periods_select(chat, select = "day", data_type = "default")
-  expect_s3_class(out, "data.frame")
-  expect_equal(nrow(out), 2)
+  chat <- chatlens:::.clh_new_chat(
+    df,
+    source = list(tz = "UTC", store_dir = source_store),
+    chat_key = "prepare_override"
+  )
+
+  prepared <- cl_prepare_analysis(chat, cache_dir = cache_dir)
+  expected_store <- chatlens:::.clh_chat_store_dir("prepare_override", cache_dir = cache_dir)
+
+  expect_true(startsWith(prepared$input_dir, file.path(expected_store, "analysis")))
+  expect_false(startsWith(prepared$input_dir, source_store))
 })
 
-test_that("cl_periods_select supports simple and aggregate data frame outputs", {
+test_that("cl_analyze_chat saves prompt result metadata and run files with provider model names", {
+  cache_dir <- tempfile("chatlens_cache_")
+  on.exit(unlink(cache_dir, recursive = TRUE), add = TRUE)
+
   df <- data.frame(
-    timestamp = as.POSIXct(c("2025-01-01 10:00:00", "2025-01-02 10:00:00"), tz = "UTC"),
-    sender = c("A", "B"),
-    text = c("one", "two"),
+    timestamp = as.POSIXct("2025-01-01 10:00:00", tz = "UTC"),
+    sender = "Alice",
+    text = "hello",
+    text_enriched = "hello",
     stringsAsFactors = FALSE
   )
-  chat <- chatlens:::new_chatlens_chat(df, source = list(tz = "UTC"))
+  chat <- chatlens:::.clh_new_chat(df, source = list(tz = "UTC"), chat_key = "analyze_chat")
+  prepared <- cl_prepare_analysis(chat, cache_dir = cache_dir)
 
-  simple_out <- cl_periods_select(chat, select = "day", data_type = "simple")
-  expect_s3_class(simple_out, "data.frame")
-  expect_equal(nrow(simple_out), 1)
-  expect_false("period" %in% names(simple_out))
-  expect_false("key" %in% names(simple_out))
-  expect_true(grepl("one", simple_out$text[1], fixed = TRUE))
-  expect_true(grepl("two", simple_out$text[1], fixed = TRUE))
-
-  aggregate_out <- cl_periods_select(chat, select = "day", data_type = "aggregate")
-  expect_s3_class(aggregate_out, "data.frame")
-  expect_equal(nrow(aggregate_out), 2)
-  expect_false("period" %in% names(aggregate_out))
-  expect_false("key" %in% names(aggregate_out))
-  expect_true(grepl("one", aggregate_out$text[1], fixed = TRUE))
-  expect_true(grepl("two", aggregate_out$text[2], fixed = TRUE))
-})
-
-test_that("cl_periods_analyze works when period and key are absent", {
   testthat::local_mocked_bindings(
-    cl_analyze_text = function(...) {
-      list(text = "ok", meta = list(source = "mock"), saved_file = NULL, meta_file = NULL)
+    gen_txt = function(prompt, add, ...) {
+      list(text = paste("analysis:", prompt, add), status_api = "SUCCESS")
     },
-    .package = "chatlens"
+    .package = "genflow"
   )
+
+  out <- cl_analyze_chat(
+    prepared,
+    prompt = "summarize",
+    service = "openai",
+    model = "gpt-5.2"
+  )
+
+  expect_s3_class(out, "chatlens_analysis_result")
+  expect_equal(out$analysis_text, "analysis: summarize 2025-01-01\n\n10:00 Alice\nhello")
+  expect_true(file.exists(out$prompt_file))
+  expect_true(file.exists(out$result_file))
+  expect_true(file.exists(out$result_rds))
+  expect_true(file.exists(out$meta_file))
+  expect_true(file.exists(out$run_file))
+  expect_true(grepl("openai_gpt-5_2", basename(out$result_file), fixed = TRUE))
+  expect_equal(paste(readLines(out$prompt_file, warn = FALSE), collapse = "\n"), "summarize")
+  expect_equal(paste(readLines(out$result_file, warn = FALSE), collapse = "\n"), out$analysis_text)
+  expect_equal(readRDS(out$result_rds)$analysis_text, out$analysis_text)
+})
+
+test_that("anonymize preserves original and updates current chat backups", {
+  cache_dir <- tempfile("chatlens_cache_")
+  on.exit(unlink(cache_dir, recursive = TRUE), add = TRUE)
+  store_dir <- file.path(cache_dir, "whatsapp", "chats", "secret_chat")
 
   df <- data.frame(
-    timestamp = as.POSIXct(c("2025-01-01 10:00:00", "2025-01-02 10:00:00"), tz = "UTC"),
-    sender = c("A", "B"),
-    text = c("one", "two"),
+    timestamp = as.POSIXct("2025-01-01 10:00:00", tz = "UTC"),
+    sender = "Alice",
+    text = "Alice says hello",
+    text_enriched = "Alice says hello [enriched]",
     stringsAsFactors = FALSE
   )
-  chat <- chatlens:::new_chatlens_chat(df, source = list(tz = "UTC"))
+  chat <- chatlens:::.clh_new_chat(
+    df,
+    source = list(tz = "UTC"),
+    chat_key = "secret_chat"
+  )
+  alias_map <- list(items = list(
+    list(person = "Alice", alias = "Alex", variants = "Alice")
+  ))
 
-  simple_out <- cl_periods_select(chat, select = "day", data_type = "simple")
-  out <- cl_periods_analyze(simple_out, prompt = "summarize", return = "standard")
-  expect_s3_class(out, "data.frame")
-  expect_equal(nrow(out), 1)
-  expect_false("period" %in% names(out))
-  expect_false("key" %in% names(out))
-  expect_equal(out$analysis_text, "ok")
+  out <- cl_chat_anonymize(
+    chat,
+    alias_map = alias_map,
+    save_original = TRUE,
+    cache_dir = cache_dir
+  )
+
+  original_rds_path <- file.path(store_dir, "chat_original.rds")
+  original_txt_path <- file.path(store_dir, "chat_original.txt")
+  chat_rds_path <- file.path(store_dir, "chat.rds")
+  chat_txt_path <- file.path(store_dir, "chat.txt")
+
+  expect_true(file.exists(original_rds_path))
+  expect_true(file.exists(original_txt_path))
+  expect_true(file.exists(chat_rds_path))
+  expect_true(file.exists(chat_txt_path))
+  expect_equal(readRDS(original_rds_path)$sender, "Alice")
+  expect_equal(readRDS(chat_rds_path)$sender, "Alex")
+  expect_equal(readRDS(chat_rds_path)$text_enriched, "Alex says hello [enriched]")
+  expect_equal(out$sender, "Alex")
+
+  original_txt <- paste(readLines(original_txt_path, warn = FALSE), collapse = "\n")
+  chat_txt <- paste(readLines(chat_txt_path, warn = FALSE), collapse = "\n")
+  expect_true(grepl("2025-01-01 10:00:00 - Alice: Alice says hello [enriched]", original_txt, fixed = TRUE))
+  expect_true(grepl("2025-01-01 10:00:00 - Alex: Alex says hello [enriched]", chat_txt, fixed = TRUE))
+
+  writeLines("stale transcript", chat_txt_path)
+  df$text_enriched <- "Alice fresh mirrored text"
+  chat <- chatlens:::.clh_new_chat(
+    df,
+    source = list(tz = "UTC"),
+    chat_key = "secret_chat"
+  )
+
+  cl_chat_anonymize(
+    chat,
+    alias_map = alias_map,
+    save_original = TRUE,
+    cache_dir = cache_dir
+  )
+
+  original_txt <- paste(readLines(original_txt_path, warn = FALSE), collapse = "\n")
+  chat_txt <- paste(readLines(chat_txt_path, warn = FALSE), collapse = "\n")
+  expect_true(grepl("2025-01-01 10:00:00 - Alice: Alice says hello [enriched]", original_txt, fixed = TRUE))
+  expect_false(grepl("stale transcript", chat_txt, fixed = TRUE))
+  expect_true(grepl("2025-01-01 10:00:00 - Alex: Alex fresh mirrored text", chat_txt, fixed = TRUE))
+  expect_equal(readRDS(original_rds_path)$text_enriched, "Alice says hello [enriched]")
+  expect_equal(readRDS(chat_rds_path)$text_enriched, "Alex fresh mirrored text")
 })
 
 test_that("cl_whatsapp_summary prints clean labels and data-quality notes", {
@@ -152,7 +239,7 @@ test_that("cl_whatsapp_summary prints clean labels and data-quality notes", {
   df$attachment <- c(NA_character_, NA_character_)
   df$attachment_type <- c(NA_character_, NA_character_)
 
-  chat <- chatlens:::new_chatlens_chat(df, source = list(tz = "UTC"))
+  chat <- chatlens:::.clh_new_chat(df, source = list(tz = "UTC"))
   out <- capture.output(res <- cl_whatsapp_summary(chat))
 
   expect_false(any(grepl("<NA>", out, fixed = TRUE)))
@@ -160,26 +247,4 @@ test_that("cl_whatsapp_summary prints clean labels and data-quality notes", {
   expect_true(any(grepl("missing timestamps", out, fixed = TRUE)))
   expect_true(any(grepl("unknown", out, fixed = TRUE)))
   expect_true(length(res$notes) > 0)
-})
-
-test_that("analysis response label uses first 10 chars", {
-  expect_equal(chatlens:::cl_response_label("Hello world from model", n = 10), "hello_worl")
-  expect_equal(chatlens:::cl_response_label("   ", n = 10), "analysis")
-  expect_equal(chatlens:::cl_response_label(NA_character_, n = 10), "analysis")
-})
-
-test_that("cl_periods_analyze accepts aggregated text input", {
-  testthat::local_mocked_bindings(
-    cl_analyze_text = function(...) {
-      list(text = "ok", meta = list(source = "mock"), saved_file = NULL, meta_file = NULL)
-    },
-    .package = "chatlens"
-  )
-
-  out <- cl_periods_analyze("line one\nline two", prompt = "summarize", return = "standard")
-  expect_s3_class(out, "data.frame")
-  expect_equal(nrow(out), 1)
-  expect_equal(out$period, "text")
-  expect_equal(out$key, "input")
-  expect_equal(out$analysis_text, "ok")
 })

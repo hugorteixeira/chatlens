@@ -1,6 +1,6 @@
 # WhatsApp import checks and summaries
 
-cl_period_key <- function(ts, period) {
+.clh_period_key <- function(ts, period) {
   if (length(ts) == 0) return(character(0))
   if (period == "year") return(format(ts, "%Y"))
   if (period == "month") return(format(ts, "%Y-%m"))
@@ -13,14 +13,14 @@ cl_period_key <- function(ts, period) {
   stop("Unsupported period: ", period)
 }
 
-chatlens_normalize_label <- function(x, unknown = "unknown") {
+.clh_normalize_label <- function(x, unknown = "unknown") {
   x <- as.character(x)
   bad <- is.na(x) | x == "<NA>" | !nzchar(trimws(x))
   x[bad] <- unknown
   x
 }
 
-chatlens_count_df <- function(x, name_col) {
+.clh_count_df <- function(x, name_col) {
   tbl <- table(x, useNA = "ifany")
   if (length(tbl) == 0) {
     out <- data.frame(value = character(0), count = integer(0), stringsAsFactors = FALSE)
@@ -29,7 +29,7 @@ chatlens_count_df <- function(x, name_col) {
   }
 
   out <- data.frame(
-    value = chatlens_normalize_label(names(tbl)),
+    value = .clh_normalize_label(names(tbl)),
     count = as.integer(tbl),
     stringsAsFactors = FALSE
   )
@@ -39,11 +39,11 @@ chatlens_count_df <- function(x, name_col) {
   out
 }
 
-chatlens_print_section <- function(title) {
+.clh_print_section <- function(title) {
   cat("\n", title, "\n", strrep("-", nchar(title)), "\n", sep = "")
 }
 
-chatlens_print_count_rows <- function(df, name_col, total = NULL) {
+.clh_print_count_rows <- function(df, name_col, total = NULL) {
   if (nrow(df) == 0) {
     cat("  - none: 0\n")
     return(invisible(NULL))
@@ -97,7 +97,7 @@ cl_whatsapp_summary <- function(chat = NULL,
   if (is.null(participants)) participants <- unique(stats::na.omit(chat$sender))
   participants <- unique(participants[!is.na(participants) & nzchar(participants)])
 
-  att_tbl <- cl_attachments(chat)
+  att_tbl <- .clh_attachments(chat)
   total_attachments <- nrow(att_tbl)
 
   summary_df <- data.frame(
@@ -111,11 +111,11 @@ cl_whatsapp_summary <- function(chat = NULL,
     stringsAsFactors = FALSE
   )
 
-  msg_type_df <- chatlens_count_df(chat$message_type, "message_type")
+  msg_type_df <- .clh_count_df(chat$message_type, "message_type")
 
   if (nrow(att_tbl) > 0) {
-    att_type_df <- chatlens_count_df(att_tbl$attachment_type, "attachment_type")
-    att_status_df <- chatlens_count_df(att_tbl$attachment_status, "attachment_status")
+    att_type_df <- .clh_count_df(att_tbl$attachment_type, "attachment_type")
+    att_status_df <- .clh_count_df(att_tbl$attachment_status, "attachment_status")
   } else {
     att_type_df <- data.frame(attachment_type = character(0), count = integer(0), stringsAsFactors = FALSE)
     att_status_df <- data.frame(attachment_status = character(0), count = integer(0), stringsAsFactors = FALSE)
@@ -123,7 +123,7 @@ cl_whatsapp_summary <- function(chat = NULL,
 
   periods <- c("year", "month", "week", "day")
   period_counts <- lapply(periods, function(p) {
-    keys <- cl_period_key(ts_valid, p)
+    keys <- .clh_period_key(ts_valid, p)
     data.frame(
       period = p,
       distinct = length(unique(keys)),
@@ -197,21 +197,21 @@ cl_whatsapp_summary <- function(chat = NULL,
   cat(sprintf("  - attachments: %s\n", summary_df$value[summary_df$metric == "attachments"]))
   cat(sprintf("  - date_range: %s\n", summary_df$value[summary_df$metric == "date_range"]))
 
-  chatlens_print_section("Message Types")
-  chatlens_print_count_rows(msg_type_df, "message_type", total = n)
+  .clh_print_section("Message Types")
+  .clh_print_count_rows(msg_type_df, "message_type", total = n)
 
-  chatlens_print_section("Attachment Types")
-  chatlens_print_count_rows(att_type_df, "attachment_type", total = total_attachments)
+  .clh_print_section("Attachment Types")
+  .clh_print_count_rows(att_type_df, "attachment_type", total = total_attachments)
 
-  chatlens_print_section("Attachment Status")
-  chatlens_print_count_rows(att_status_df, "attachment_status", total = total_attachments)
+  .clh_print_section("Attachment Status")
+  .clh_print_count_rows(att_status_df, "attachment_status", total = total_attachments)
 
-  chatlens_print_section("Distinct Periods")
+  .clh_print_section("Distinct Periods")
   for (i in seq_len(nrow(period_df))) {
     cat(sprintf("  - %s: %d\n", period_df$period[i], period_df$distinct[i]))
   }
 
-  chatlens_print_section("Data Quality Notes")
+  .clh_print_section("Data Quality Notes")
   if (length(notes) == 0) {
     cat("  - no missing or unknown values detected.\n")
   } else {
@@ -230,15 +230,10 @@ cl_whatsapp_summary <- function(chat = NULL,
   ))
 }
 
-#' Filter chat by period key
-#' @param chat A `chatlens_chat` object
-#' @param period One of `"year"`, `"month"`, `"week"`, or `"day"`
-#' @param key Period key value to keep
-#' @export
-cl_chat_filter_period <- function(chat, period, key) {
+.clh_chat_filter_period <- function(chat, period, key) {
   if (!inherits(chat, "chatlens_chat")) stop("chat must be a chatlens_chat object")
   period <- match.arg(period, choices = c("year", "month", "week", "day"))
-  keys <- cl_period_key(chat$timestamp, period)
+  keys <- .clh_period_key(chat$timestamp, period)
   keep <- keys == key
   keep[is.na(keep)] <- FALSE
   chat[keep, , drop = FALSE]

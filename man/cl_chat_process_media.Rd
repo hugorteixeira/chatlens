@@ -9,11 +9,13 @@ cl_chat_process_media(
   include_audio = TRUE,
   include_images = TRUE,
   audio_tag = "AUDIO TRANSCRIPT",
-  image_tag = "IMAGE DESCRIPTION"
+  image_tag = "IMAGE DESCRIPTION",
+  cache_dir = NULL,
+  save_chat = TRUE
 )
 }
 \arguments{
-\item{chat}{A `chatlens_chat` object}
+\item{chat}{A \code{chatlens_chat} object}
 
 \item{include_audio}{Include audio transcript annotations}
 
@@ -22,6 +24,12 @@ cl_chat_process_media(
 \item{audio_tag}{Tag label used for audio annotations}
 
 \item{image_tag}{Tag label used for image annotations}
+
+\item{cache_dir}{Optional cache directory. When \code{NULL}, uses the chat's
+stored cache location or \verb{~/.chatlens}.}
+
+\item{save_chat}{Save the current chat state in cache as \code{chat.rds} plus a
+mirrored \code{chat.txt} transcript}
 }
 \description{
 Enrich text with media annotations

@@ -20,9 +20,9 @@ test_that("audio transcript cache is keyed by attachment key, not filename", {
   df$attachment_keys <- list("path:/tmp/a/AUDIO.mp3", "path:/tmp/b/AUDIO.mp3")
   df$attachment_statuses <- list("present", "present")
 
-  chat <- chatlens:::new_chatlens_chat(df, chat_key = "my_chat", zip_id = "zip1")
+  chat <- chatlens:::.clh_new_chat(df, chat_key = "my_chat", zip_id = "zip1")
 
-  store <- chatlens:::chatlens_chat_store_dir("my_chat", cache_dir = cache_dir)
+  store <- chatlens:::.clh_chat_store_dir("my_chat", cache_dir = cache_dir)
   manifest_path <- file.path(store, "audio_manifest.json")
   manifest <- list(
     updated_at = NULL,
@@ -52,10 +52,115 @@ test_that("audio transcript cache is keyed by attachment key, not filename", {
   out <- cl_chat_transcribe_audio(chat, cache_dir = cache_dir, verbose = FALSE, overwrite = FALSE)
   expect_equal(unname(out$audio_transcripts[[1]]), "first transcript")
   expect_equal(unname(out$audio_transcripts[[2]]), "second transcript")
+
+  current_path <- file.path(store, "chat.rds")
+  current_txt <- file.path(store, "chat.txt")
+  expect_true(file.exists(current_path))
+  expect_true(file.exists(current_txt))
+  expect_equal(readRDS(current_path)$audio_transcript, c("first transcript", "second transcript"))
+
+  txt <- paste(readLines(current_txt, warn = FALSE), collapse = "\n")
+  expect_true(grepl("first transcript", txt, fixed = TRUE))
+  expect_true(grepl("second transcript", txt, fixed = TRUE))
+})
+
+test_that("media processing updates current chat text backup", {
+  cache_dir <- tempfile("chatlens_cache_")
+  dir.create(cache_dir)
+  on.exit(unlink(cache_dir, recursive = TRUE), add = TRUE)
+
+  df <- data.frame(
+    timestamp = as.POSIXct("2025-01-01 10:00:00", tz = "UTC"),
+    sender = "A",
+    text = "AUDIO.mp3 (file attached)",
+    message_id = 1L,
+    attachment = "AUDIO.mp3",
+    attachment_type = "audio",
+    stringsAsFactors = FALSE
+  )
+  df$attachments <- list("AUDIO.mp3")
+  df$audio_transcripts <- list(c("AUDIO.mp3" = "voice note text"))
+
+  chat <- chatlens:::.clh_new_chat(df, chat_key = "processed_chat", zip_id = "zip1")
+  out <- cl_chat_process_media(chat, cache_dir = cache_dir)
+
+  store <- chatlens:::.clh_chat_store_dir("processed_chat", cache_dir = cache_dir)
+  current_rds <- file.path(store, "chat.rds")
+  current_txt <- file.path(store, "chat.txt")
+
+  expect_true(file.exists(current_rds))
+  expect_true(file.exists(current_txt))
+  expect_true(grepl("voice note text", readRDS(current_rds)$text_enriched[1], fixed = TRUE))
+
+  txt <- paste(readLines(current_txt, warn = FALSE), collapse = "\n")
+  expect_true(grepl("voice note text", txt, fixed = TRUE))
+  expect_equal(out$text_enriched, readRDS(current_rds)$text_enriched)
+})
+
+test_that("audio transcription errors print and persist useful provider reasons", {
+  cache_dir <- tempfile("chatlens_cache_")
+  dir.create(cache_dir)
+  on.exit(unlink(cache_dir, recursive = TRUE), add = TRUE)
+
+  audio_path <- file.path(cache_dir, "PTT-1.mp3")
+  writeLines("fake audio bytes", audio_path)
+
+  df <- data.frame(
+    timestamp = as.POSIXct("2025-01-01 10:00:00", tz = "UTC"),
+    sender = "A",
+    text = "PTT-1.mp3 (file attached)",
+    message_id = 1L,
+    attachment = "PTT-1.mp3",
+    attachment_type = "audio",
+    attachment_path = audio_path,
+    attachment_key = paste0("path:", audio_path),
+    stringsAsFactors = FALSE
+  )
+  df$attachments <- list("PTT-1.mp3")
+  df$attachment_types <- list("audio")
+  df$attachment_paths <- list(audio_path)
+  df$attachment_keys <- list(paste0("path:", audio_path))
+  df$attachment_statuses <- list("present")
+
+  chat <- chatlens:::.clh_new_chat(df, chat_key = "audio_error_chat", zip_id = "zip1")
+
+  testthat::local_mocked_bindings(
+    gen_stt = function(...) {
+      "API_ERROR: invalid model openai/whisper for provider groq"
+    },
+    .package = "genflow"
+  )
+
+  out <- NULL
+  messages <- capture.output(
+    out <- cl_chat_transcribe_audio(
+      chat,
+      service = "groq",
+      model = "openai/whisper",
+      cache_dir = cache_dir,
+      verbose = TRUE,
+      overwrite = TRUE
+    ),
+    type = "message"
+  )
+
+  expect_true(any(grepl("API_ERROR: invalid model openai/whisper", messages, fixed = TRUE)))
+  expect_true(any(grepl("[groq/openai/whisper]", messages, fixed = TRUE)))
+  expect_true(is.na(out$audio_transcript[1]))
+
+  store <- chatlens:::.clh_chat_store_dir("audio_error_chat", cache_dir = cache_dir)
+  manifest <- jsonlite::read_json(file.path(store, "audio_manifest.json"), simplifyVector = FALSE)
+  key <- paste0("path:", audio_path)
+
+  expect_equal(manifest$items[[key]]$status, "error")
+  expect_equal(
+    manifest$items[[key]]$error_message,
+    "API_ERROR: invalid model openai/whisper for provider groq"
+  )
 })
 
 test_that("media functions do not fail when chat_key is missing", {
-  chat <- chatlens:::new_chatlens_chat(
+  chat <- chatlens:::.clh_new_chat(
     data.frame(
       timestamp = as.POSIXct("2025-01-01 10:00:00", tz = "UTC"),
       sender = "A",
@@ -108,9 +213,9 @@ test_that("image cache reuse respects prompt", {
   df$attachment_keys <- list(paste0("path:", img_path))
   df$attachment_statuses <- list("present")
 
-  chat <- chatlens:::new_chatlens_chat(df, chat_key = "my_chat", zip_id = "zip1")
+  chat <- chatlens:::.clh_new_chat(df, chat_key = "my_chat", zip_id = "zip1")
 
-  store <- chatlens:::chatlens_chat_store_dir("my_chat", cache_dir = cache_dir)
+  store <- chatlens:::.clh_chat_store_dir("my_chat", cache_dir = cache_dir)
   desc_dir <- file.path(store, "image_descriptions")
   dir.create(desc_dir, recursive = TRUE)
   desc_path <- file.path(desc_dir, "IMG.txt")
@@ -182,8 +287,8 @@ test_that("image API errors are not saved as text files", {
   df$attachment_keys <- list(paste0("path:", img_path))
   df$attachment_statuses <- list("present")
 
-  chat <- chatlens:::new_chatlens_chat(df, chat_key = "my_chat_error", zip_id = "zip1")
-  store <- chatlens:::chatlens_chat_store_dir("my_chat_error", cache_dir = cache_dir)
+  chat <- chatlens:::.clh_new_chat(df, chat_key = "my_chat_error", zip_id = "zip1")
+  store <- chatlens:::.clh_chat_store_dir("my_chat_error", cache_dir = cache_dir)
   desc_dir <- file.path(store, "image_descriptions")
   dir.create(desc_dir, recursive = TRUE)
   desc_path <- file.path(desc_dir, "ERR.txt")
@@ -211,4 +316,5 @@ test_that("image API errors are not saved as text files", {
   expect_true(is.na(out1$image_description[1]))
   expect_true(is.na(out2$image_description[1]))
   expect_equal(manifest$items[[key]]$status, "error")
+  expect_equal(manifest$items[[key]]$error_message, "Bad Request: invalid image payload")
 })

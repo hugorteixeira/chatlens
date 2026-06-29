@@ -12,7 +12,7 @@ Expect bugs, rough edges, and breaking changes while the API stabilizes.
 ## Why this is fun for R people 🎉
 
 - Data-first API: returns `data.frame` / `chatlens_chat` objects you can inspect and transform.
-- Real pipeline feel: import -> anonymize -> enrich -> segment -> analyze.
+- Real pipeline feel: import -> anonymize -> enrich -> prepare -> analyze.
 - Works great with prompt-driven analysis for:
   - communication patterns
   - cognitive style hints
@@ -28,10 +28,9 @@ flowchart LR
     C --> D[🎙️ cl_chat_transcribe_audio]
     D --> E[🖼️ cl_chat_describe_images]
     E --> F[🧩 cl_chat_process_media]
-    F --> G[🗂️ cl_chat_split_periods]
-    G --> H[🎯 cl_periods_select]
-    H --> I[🧠 cl_periods_analyze]
-    I --> J[💾 cl_periods_write / saved analyses]
+    F --> G[🗂️ cl_prepare_analysis]
+    G --> H[🧠 cl_analyze_chat]
+    H --> I[💾 input / prompt / result / metadata]
 ```
 
 ## Install
@@ -76,33 +75,68 @@ chat <- cl_chat_describe_images(
 )
 chat <- cl_chat_process_media(chat)
 
-# 5) Split by time period and select what matters
-periods <- cl_chat_split_periods(chat, period = c("all", "month", "week", "day"))
-
-selected <- cl_periods_select(
-  periods,
-  select = "2025-01:2025-03",
-  data_type = "aggregate"   # "default" | "aggregate" | "simple"
+# 5) Prepare compact LLM input
+prepared <- cl_prepare_analysis(
+  chat,
+  period = "month",
+  select = "2025-01:2025-03"
 )
 
 # 6) Prompted analysis
-analysis <- cl_periods_analyze(
-  selected,
+analysis <- cl_analyze_chat(
+  prepared,
   prompt = "Map recurring communication patterns, possible cognitive biases, and shifts in emotional tone. Be concrete and cite examples.",
   service = "openai",
   model = "gpt-5.2",
-  reasoning = "high",
-  return = "standard"
+  reasoning = "high"
 )
 
 analysis
 ```
 
-## `data_type` in `cl_periods_select` (important)
+## Analysis inputs
 
-- `"default"`: returns selected rows with `period` + `key`.
-- `"aggregate"`: returns selected rows without `period` + `key`.
-- `"simple"`: returns a one-row data frame with merged `text`, without `period` + `key`.
+`cl_prepare_analysis()` saves the exact text sent to the LLM under the chat
+analysis directory. By default it uses compact `"simple"` formatting, which
+groups repeated dates and consecutive messages from the same sender. This is
+also the transcript export step for analysis.
+
+All cache-backed functions use `cache_dir = NULL` by default, which resolves to
+`~/.chatlens`. Pass the same `cache_dir` to import, processing, and analysis if
+you want to keep a chat in a different cache root.
+
+```r
+# Whole chat
+prepared <- cl_prepare_analysis(chat)
+
+# One month as one input
+prepared <- cl_prepare_analysis(chat, period = "month", select = "2023-08")
+
+# One input per day in the selected month
+prepared <- cl_prepare_analysis(chat, period = "day", select = "2023-08")
+```
+
+The default analysis layout is:
+
+```text
+~/.chatlens/whatsapp/chats/<chat_key>/analysis/
+  all/input.txt
+  by_year/<YYYY>/input.txt
+  by_month/<YYYY>/<MM>/input.txt
+  by_week/<YYYY>/<WW>/input.txt
+  by_day/<YYYY>/<MM>/<DD>/input.txt
+```
+
+Each prepared directory also stores `input.rds` when `save = TRUE`. After
+`cl_analyze_chat()`, the same directory receives timestamped analysis artifacts:
+
+```text
+prompt_<timestamp>_<service>_<model>.txt
+result_<timestamp>_<service>_<model>.txt
+result_<timestamp>_<service>_<model>.rds
+meta_<timestamp>_<service>_<model>.json
+run_<timestamp>_<service>_<model>.json
+```
 
 ## Prompt ideas for pattern, bias, and cognitive insights 🧠
 
@@ -118,9 +152,10 @@ prompt <- paste(
   "Do not diagnose medical or psychiatric conditions."
 )
 
-insights <- cl_periods_analyze(
-  periods,
-  select = "month",
+prepared <- cl_prepare_analysis(chat, period = "month")
+
+insights <- cl_analyze_chat(
+  prepared,
   prompt = prompt,
   service = "openai",
   model = "gpt-5.2",
@@ -159,7 +194,9 @@ By default, outputs are cached under `~/.chatlens`, including:
 - audio transcripts
 - image descriptions
 - manifests and run logs
-- analysis text files + metadata
+- analysis inputs, prompts, results, provider metadata, and run metadata
+- chat RDS backups with mirrored `.txt` transcripts (`chat_original.*` keeps
+  the raw import; `chat.*` is the latest `chatlens_chat` state)
 
 This makes reruns faster and reproducible.
 

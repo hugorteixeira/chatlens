@@ -1,9 +1,6 @@
 # Attachment helpers
 
-#' Expand chat attachments into a table
-#' @param chat A `chatlens_chat` object
-#' @export
-cl_attachments <- function(chat) {
+.clh_attachments <- function(chat) {
   if (!inherits(chat, "chatlens_chat")) stop("chat must be a chatlens_chat object")
   n <- nrow(chat)
   rows <- list()

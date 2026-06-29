@@ -1,6 +1,6 @@
 # Chat object helpers
 
-new_chatlens_chat <- function(df, source = list(), participants = NULL, chat_key = NULL, zip_id = NULL) {
+.clh_new_chat <- function(df, source = list(), participants = NULL, chat_key = NULL, zip_id = NULL) {
   df <- as.data.frame(df, stringsAsFactors = FALSE)
   class(df) <- c("chatlens_chat", class(df))
   attr(df, "source") <- source

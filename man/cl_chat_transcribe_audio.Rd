@@ -8,26 +8,31 @@ cl_chat_transcribe_audio(
   chat,
   service = "replicate",
   model = "openai/whisper",
-  cache_dir = cl_cache_dir(),
+  cache_dir = NULL,
   overwrite = FALSE,
   verbose = TRUE,
+  save_chat = TRUE,
   ...
 )
 }
 \arguments{
-\item{chat}{A `chatlens_chat` object}
+\item{chat}{A \code{chatlens_chat} object}
 
 \item{service}{Provider name for speech-to-text}
 
 \item{model}{Model id for speech-to-text}
 
-\item{cache_dir}{Cache directory}
+\item{cache_dir}{Optional cache directory. When \code{NULL}, uses the chat's
+stored cache location or \verb{~/.chatlens}.}
 
 \item{overwrite}{Reprocess items even if cached output exists}
 
 \item{verbose}{Whether to emit progress messages}
 
-\item{...}{Additional arguments passed to [genflow::gen_stt()]}
+\item{save_chat}{Save the current chat state in cache as \code{chat.rds} plus a
+mirrored \code{chat.txt} transcript}
+
+\item{...}{Additional arguments passed to \code{\link[genflow:gen_stt]{genflow::gen_stt()}}}
 }
 \description{
 Transcribe audio attachments

@@ -6,7 +6,7 @@
 \usage{
 cl_whatsapp_import(
   path,
-  cache_dir = cl_cache_dir(),
+  cache_dir = NULL,
   chat_key = NULL,
   ask_confirmation = FALSE,
   encoding = c("UTF-8", "latin1"),
@@ -17,9 +17,9 @@ cl_whatsapp_import(
 )
 }
 \arguments{
-\item{path}{Path to the WhatsApp export `.zip`}
+\item{path}{Path to the WhatsApp export \code{.zip}}
 
-\item{cache_dir}{Cache directory for extracted files}
+\item{cache_dir}{Optional cache directory. When \code{NULL}, uses \verb{~/.chatlens}.}
 
 \item{chat_key}{Optional chat key used for cache storage}
 
@@ -33,8 +33,8 @@ cl_whatsapp_import(
 
 \item{date_order}{Date order, "dmy" (default) or "mdy"}
 
-\item{omit_sender_na}{Logical; when `TRUE` (default), drops parsed rows
-whose sender is missing, empty, `"NA"`, or `"NULL"`.}
+\item{omit_sender_na}{Logical; when \code{TRUE} (default), drops parsed rows
+whose sender is missing, empty, \code{"NA"}, or \code{"NULL"}.}
 }
 \description{
 Import a WhatsApp Android ZIP export

@@ -2,7 +2,7 @@
 
 #' Import a WhatsApp Android ZIP export
 #' @param path Path to the WhatsApp export `.zip`
-#' @param cache_dir Cache directory for extracted files
+#' @param cache_dir Optional cache directory. When `NULL`, uses `~/.chatlens`.
 #' @param chat_key Optional chat key used for cache storage
 #' @param ask_confirmation Ask to confirm detected chat file
 #' @param encoding Character encoding to try when reading the chat text
@@ -13,7 +13,7 @@
 #'   whose sender is missing, empty, `"NA"`, or `"NULL"`.
 #' @export
 cl_whatsapp_import <- function(path,
-                                cache_dir = cl_cache_dir(),
+                                cache_dir = NULL,
                                 chat_key = NULL,
                                 ask_confirmation = FALSE,
                                 encoding = c("UTF-8", "latin1"),
@@ -28,12 +28,12 @@ cl_whatsapp_import <- function(path,
   if (!is.logical(omit_sender_na) || length(omit_sender_na) != 1L || is.na(omit_sender_na)) {
     stop("omit_sender_na must be TRUE or FALSE")
   }
-  zip_id <- chatlens_zip_id(path)
-  extract_dir <- chatlens_extract_dir(zip_id, cache_dir)
+  zip_id <- .clh_zip_id(path)
+  extract_dir <- .clh_extract_dir(zip_id, cache_dir)
   marker <- file.path(extract_dir, ".extracted")
 
   if (!dir.exists(extract_dir) || !file.exists(marker)) {
-    chatlens_ensure_dir(extract_dir)
+    .clh_ensure_dir(extract_dir)
     if (verbose) message("Extracting ZIP to cache: ", extract_dir)
     utils::unzip(path, exdir = extract_dir)
     file.create(marker)
@@ -42,16 +42,16 @@ cl_whatsapp_import <- function(path,
   }
 
   files <- list.files(extract_dir, recursive = TRUE, full.names = TRUE)
-  chat_file <- whatsapp_detect_chat_file(files, ask_confirmation = ask_confirmation, encoding = encoding)
+  chat_file <- .clh_whatsapp_detect_chat_file(files, ask_confirmation = ask_confirmation, encoding = encoding)
   if (verbose) message("Chat file: ", basename(chat_file))
-  if (is.null(chat_key) || !nzchar(chat_key)) chat_key <- chatlens_chat_key_from_file(chat_file)
-  store_dir <- chatlens_chat_store_dir(chat_key, cache_dir)
+  if (is.null(chat_key) || !nzchar(chat_key)) chat_key <- .clh_chat_key_from_file(chat_file)
+  store_dir <- .clh_chat_store_dir(chat_key, cache_dir)
 
-  lines <- chatlens_read_lines(chat_file, encoding = encoding)
-  chat <- whatsapp_parse_lines(lines, tz = tz, date_order = date_order, omit_sender_na = omit_sender_na)
-  chat <- whatsapp_resolve_attachments(chat, media_dir = extract_dir, zip_id = zip_id)
+  lines <- .clh_read_lines(chat_file, encoding = encoding)
+  chat <- .clh_whatsapp_parse_lines(lines, tz = tz, date_order = date_order, omit_sender_na = omit_sender_na)
+  chat <- .clh_whatsapp_resolve_attachments(chat, media_dir = extract_dir, zip_id = zip_id)
 
-  participants <- cl_detect_participants(chat)
+  participants <- .clh_detect_participants(chat)
   source <- list(
     path = path,
     extract_dir = extract_dir,
@@ -63,10 +63,12 @@ cl_whatsapp_import <- function(path,
     zip_id = zip_id
   )
 
-  new_chatlens_chat(chat, source = source, participants = participants, chat_key = chat_key, zip_id = zip_id)
+  chat <- .clh_new_chat(chat, source = source, participants = participants, chat_key = chat_key, zip_id = zip_id)
+  .clh_save_original_chat(chat, cache_dir = cache_dir, overwrite = TRUE)
+  .clh_save_current_chat(chat, cache_dir = cache_dir)
 }
 
-whatsapp_detect_chat_file <- function(files, ask_confirmation = FALSE, encoding = c("UTF-8", "latin1")) {
+.clh_whatsapp_detect_chat_file <- function(files, ask_confirmation = FALSE, encoding = c("UTF-8", "latin1")) {
   txt_files <- files[grepl("\\.txt$", files, ignore.case = TRUE)]
   if (length(txt_files) == 0) stop("No .txt files found in the ZIP export.")
 
@@ -75,10 +77,10 @@ whatsapp_detect_chat_file <- function(files, ask_confirmation = FALSE, encoding 
 
   scores <- vapply(seq_along(txt_files), function(i) {
     f <- txt_files[i]
-    lines <- tryCatch(chatlens_read_lines(f, encoding = encoding), error = function(e) character(0))
+    lines <- tryCatch(.clh_read_lines(f, encoding = encoding), error = function(e) character(0))
     # Only look at the first 200 lines for speed
     if (length(lines) > 200) lines <- lines[1:200]
-    sum(whatsapp_is_message_line(lines)) + if (priority[i]) 1000 else 0
+    sum(.clh_whatsapp_is_message_line(lines)) + if (priority[i]) 1000 else 0
   }, FUN.VALUE = numeric(1))
 
   best_idx <- which.max(scores)
@@ -101,18 +103,18 @@ whatsapp_detect_chat_file <- function(files, ask_confirmation = FALSE, encoding 
   candidate
 }
 
-whatsapp_is_message_line <- function(line) {
+.clh_whatsapp_is_message_line <- function(line) {
   pattern <- "^[\\s\\u200e\\ufeff]*\\d{1,2}/\\d{1,2}/\\d{2,4}[, ]+\\d{1,2}:\\d{2}(?::\\d{2})?(?:\\s?[APMapm]{2})?\\s+-\\s+"
   grepl(pattern, line)
 }
 
-whatsapp_parse_lines <- function(lines, tz = "UTC", date_order = "dmy", omit_sender_na = TRUE) {
+.clh_whatsapp_parse_lines <- function(lines, tz = "UTC", date_order = "dmy", omit_sender_na = TRUE) {
   if (length(lines) == 0) return(data.frame())
   if (!is.logical(omit_sender_na) || length(omit_sender_na) != 1L || is.na(omit_sender_na)) {
     stop("omit_sender_na must be TRUE or FALSE")
   }
 
-  starts <- which(whatsapp_is_message_line(lines))
+  starts <- which(.clh_whatsapp_is_message_line(lines))
   if (length(starts) == 0) stop("No WhatsApp message lines detected.")
   ends <- c(starts[-1] - 1, length(lines))
 
@@ -132,7 +134,7 @@ whatsapp_parse_lines <- function(lines, tz = "UTC", date_order = "dmy", omit_sen
     date_time <- substr(header, 1, sep[1] - 1)
     rest <- substr(header, sep[1] + 3, nchar(header))
 
-    ts <- chatlens_parse_datetime(date_time, tz = tz, date_order = date_order)
+    ts <- .clh_parse_datetime(date_time, tz = tz, date_order = date_order)
 
     sender <- NA_character_
     text <- rest
@@ -166,7 +168,7 @@ whatsapp_parse_lines <- function(lines, tz = "UTC", date_order = "dmy", omit_sen
   df$message_id <- seq_len(nrow(df))
   df$text_raw <- df$text
 
-  attachment_info <- whatsapp_detect_attachments(df$text)
+  attachment_info <- .clh_whatsapp_detect_attachments(df$text)
   df$attachments <- attachment_info$filenames
   df$attachment_types <- attachment_info$types
   df$attachment_placeholder <- attachment_info$placeholder
@@ -189,13 +191,13 @@ whatsapp_parse_lines <- function(lines, tz = "UTC", date_order = "dmy", omit_sen
   # Normalize system messages to English
   if (any(df$message_type == "system", na.rm = TRUE)) {
     idx <- which(df$message_type == "system")
-    df$text[idx] <- vapply(df$text[idx], whatsapp_normalize_system_text, FUN.VALUE = character(1))
+    df$text[idx] <- vapply(df$text[idx], .clh_whatsapp_normalize_system_text, FUN.VALUE = character(1))
   }
 
   df
 }
 
-whatsapp_detect_attachments <- function(text) {
+.clh_whatsapp_detect_attachments <- function(text) {
   audio_ext <- c("opus", "mp3", "m4a", "wav", "ogg", "aac", "flac")
   image_ext <- c("jpg", "jpeg", "png", "gif", "webp", "heic", "bmp", "tiff")
   video_ext <- c("mp4", "mov", "mkv", "avi", "3gp", "webm")
@@ -246,7 +248,7 @@ whatsapp_detect_attachments <- function(text) {
   list(filenames = filenames, placeholder = placeholder, omitted = omitted, types = types)
 }
 
-whatsapp_normalize_system_text <- function(text) {
+.clh_whatsapp_normalize_system_text <- function(text) {
   if (is.na(text) || !nzchar(text)) return(text)
 
   # Encryption notices
@@ -376,7 +378,7 @@ whatsapp_normalize_system_text <- function(text) {
   text
 }
 
-whatsapp_resolve_attachments <- function(chat, media_dir, zip_id = NA_character_) {
+.clh_whatsapp_resolve_attachments <- function(chat, media_dir, zip_id = NA_character_) {
   if (nrow(chat) == 0) return(chat)
   files <- list.files(media_dir, recursive = TRUE, full.names = TRUE)
   files <- files[file.exists(files) & !dir.exists(files)]
@@ -419,7 +421,7 @@ whatsapp_resolve_attachments <- function(chat, media_dir, zip_id = NA_character_
       selected <- select_attachment_path(names_i[j])
       paths_i[j] <- selected$path
       ambiguous_i[j] <- selected$ambiguous
-      keys_i[j] <- chatlens_attachment_key(names_i[j], selected$path, zip_id = zip_id)
+      keys_i[j] <- .clh_attachment_key(names_i[j], selected$path, zip_id = zip_id)
     }
     attachment_paths[[i]] <- paths_i
     attachment_ambiguous[[i]] <- ambiguous_i
