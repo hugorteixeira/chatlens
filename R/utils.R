@@ -17,6 +17,22 @@
   path
 }
 
+.clh_format_elapsed <- function(seconds) {
+  seconds <- suppressWarnings(as.numeric(seconds)[1])
+  if (length(seconds) == 0L || is.na(seconds) || !is.finite(seconds)) return("unknown")
+  seconds <- max(0, seconds)
+
+  if (seconds < 60) return(sprintf("%.2fs", seconds))
+
+  minutes <- floor(seconds / 60)
+  remaining_seconds <- seconds %% 60
+  if (minutes < 60) return(sprintf("%dm %.2fs", minutes, remaining_seconds))
+
+  hours <- floor(minutes / 60)
+  remaining_minutes <- minutes %% 60
+  sprintf("%dh %dm %.2fs", hours, remaining_minutes, remaining_seconds)
+}
+
 .clh_zip_id <- function(zip_path) {
   if (is.null(zip_path)) return(NA_character_)
   zip_path <- path.expand(zip_path)
@@ -193,43 +209,61 @@
   if (!nzchar(x)) fallback else x
 }
 
-.clh_parse_datetime <- function(x, tz = "UTC", date_order = "dmy") {
-  if (is.na(x) || !nzchar(x)) return(as.POSIXct(NA))
-  x <- trimws(x)
-  # Try multiple common WhatsApp formats
+.clh_datetime_specs <- function(date_order = "dmy") {
   if (date_order == "dmy") {
-    fmts <- c(
-      "%d/%m/%Y %H:%M:%S",
-      "%d/%m/%Y %H:%M",
-      "%d/%m/%Y, %H:%M:%S",
-      "%d/%m/%Y, %H:%M",
-      "%d/%m/%y %H:%M",
-      "%d/%m/%y, %H:%M",
-      "%d/%m/%Y %I:%M %p",
-      "%d/%m/%Y, %I:%M %p",
-      "%d/%m/%y %I:%M %p",
-      "%d/%m/%y, %I:%M %p"
-    )
+    date4 <- "%d/%m/%Y"
+    date2 <- "%d/%m/%y"
   } else {
-    fmts <- c(
-      "%m/%d/%Y %H:%M:%S",
-      "%m/%d/%Y %H:%M",
-      "%m/%d/%Y, %H:%M:%S",
-      "%m/%d/%Y, %H:%M",
-      "%m/%d/%y %H:%M",
-      "%m/%d/%y, %H:%M",
-      "%m/%d/%Y %I:%M %p",
-      "%m/%d/%Y, %I:%M %p",
-      "%m/%d/%y %I:%M %p",
-      "%m/%d/%y, %I:%M %p"
-    )
+    date4 <- "%m/%d/%Y"
+    date2 <- "%m/%d/%y"
   }
 
-  for (fmt in fmts) {
-    parsed <- suppressWarnings(as.POSIXct(strptime(x, fmt, tz = tz)))
-    if (!is.na(parsed)) return(parsed)
+  day_month <- "\\d{1,2}/\\d{1,2}/"
+  list(
+    list(format = paste(date4, "%H:%M:%S"), pattern = paste0("^", day_month, "\\d{4} \\d{1,2}:\\d{2}:\\d{2}$")),
+    list(format = paste(date4, "%H:%M"), pattern = paste0("^", day_month, "\\d{4} \\d{1,2}:\\d{2}$")),
+    list(format = paste0(date4, ", %H:%M:%S"), pattern = paste0("^", day_month, "\\d{4}, \\d{1,2}:\\d{2}:\\d{2}$")),
+    list(format = paste0(date4, ", %H:%M"), pattern = paste0("^", day_month, "\\d{4}, \\d{1,2}:\\d{2}$")),
+    list(format = paste(date2, "%H:%M"), pattern = paste0("^", day_month, "\\d{2} \\d{1,2}:\\d{2}$")),
+    list(format = paste0(date2, ", %H:%M"), pattern = paste0("^", day_month, "\\d{2}, \\d{1,2}:\\d{2}$")),
+    list(format = paste(date4, "%I:%M %p"), pattern = paste0("^", day_month, "\\d{4} \\d{1,2}:\\d{2}\\s*[APM]{2}$"), am_pm = TRUE),
+    list(format = paste0(date4, ", %I:%M %p"), pattern = paste0("^", day_month, "\\d{4}, \\d{1,2}:\\d{2}\\s*[APM]{2}$"), am_pm = TRUE),
+    list(format = paste(date2, "%I:%M %p"), pattern = paste0("^", day_month, "\\d{2} \\d{1,2}:\\d{2}\\s*[APM]{2}$"), am_pm = TRUE),
+    list(format = paste0(date2, ", %I:%M %p"), pattern = paste0("^", day_month, "\\d{2}, \\d{1,2}:\\d{2}\\s*[APM]{2}$"), am_pm = TRUE)
+  )
+}
+
+.clh_parse_datetimes <- function(x, tz = "UTC", date_order = "dmy") {
+  x <- trimws(as.character(x))
+  if (length(x) == 0L) return(as.POSIXct(character(0), tz = tz))
+
+  parsed_all <- as.POSIXct(rep(NA_real_, length(x)), origin = "1970-01-01", tz = tz)
+  remaining <- which(!is.na(x) & nzchar(x))
+
+  for (spec in .clh_datetime_specs(date_order)) {
+    if (length(remaining) == 0L) break
+    candidates <- remaining[grepl(spec$pattern, x[remaining], ignore.case = TRUE, perl = TRUE)]
+    if (length(candidates) == 0L) next
+
+    values <- x[candidates]
+    if (isTRUE(spec$am_pm)) {
+      values <- sub("([0-9])\\s*([APMapm]{2})$", "\\1 \\2", values, perl = TRUE)
+    }
+    parsed <- suppressWarnings(as.POSIXct(strptime(values, spec$format, tz = tz)))
+    matched <- !is.na(parsed)
+    if (!any(matched)) next
+
+    parsed_all[candidates[matched]] <- parsed[matched]
+    remaining <- setdiff(remaining, candidates[matched])
   }
-  as.POSIXct(NA)
+
+  parsed_all
+}
+
+.clh_parse_datetime <- function(x, tz = "UTC", date_order = "dmy") {
+  parsed <- .clh_parse_datetimes(x, tz = tz, date_order = date_order)
+  if (length(parsed) == 0L) return(as.POSIXct(NA, tz = tz))
+  parsed[1]
 }
 
 .clh_or <- function(...) {
@@ -328,10 +362,12 @@
   audio_ext <- c("opus", "mp3", "m4a", "wav", "ogg", "aac", "flac")
   image_ext <- c("jpg", "jpeg", "png", "gif", "webp", "heic", "bmp", "tiff")
   video_ext <- c("mp4", "mov", "mkv", "avi", "3gp", "webm")
-  doc_ext <- c("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "zip", "rar", "7z", "csv", "vcf")
+  contact_ext <- "vcf"
+  doc_ext <- c("pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt", "zip", "rar", "7z", "csv")
   if (ext %in% audio_ext) return("audio")
   if (ext %in% image_ext) return("image")
   if (ext %in% video_ext) return("video")
+  if (ext %in% contact_ext) return("contact")
   if (ext %in% doc_ext) return("file")
   "file"
 }

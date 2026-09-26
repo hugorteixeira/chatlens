@@ -37,3 +37,10 @@ mirrored \code{chat.txt} transcript}
 \description{
 Transcribe audio attachments
 }
+\details{
+The progress total includes only unique audio files that are available after
+import, plus reusable cached transcripts. Audio references already marked as
+missing by \code{\link[=cl_whatsapp_import]{cl_whatsapp_import()}} are recorded in the manifest and run log,
+but are not sent to the transcription provider. A defensive check still
+warns if a file marked as present disappears after import.
+}

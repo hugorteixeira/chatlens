@@ -35,14 +35,25 @@ flowchart LR
 
 ## Install
 
-`chatlens` depends on `genflow`, and right now you need to install it from GitHub first:
+`chatlens` requires `genflow >= 0.0.5`. Install the current `genflow` release
+before loading Chatlens:
 
 ```r
 install.packages("remotes")
-remotes::install_github("hugorteixeira/genflow")
+remotes::install_github("hugorteixeira/genflow", force = TRUE)
+stopifnot(packageVersion("genflow") >= "0.0.5")
 ```
 
-From local source:
+Restart the R session after installing or updating `genflow`; an already loaded
+namespace keeps the old functions even when the package on disk is newer.
+Before scanning or changing the image cache, Chatlens verifies that the live
+`genflow` namespace supports the parallel image-batch contract and reports the
+loaded and installed versions when a restart or reinstall is needed.
+
+Image provider requests use independent PSOCK worker processes. They do not
+fork the active RStudio process or inherit its initialized `curl`/`httr` state.
+
+Then install `chatlens` from its local source directory:
 
 ```r
 install.packages("devtools")
@@ -71,7 +82,8 @@ chat <- cl_chat_anonymize(chat, interactive = TRUE)
 chat <- cl_chat_transcribe_audio(chat, service = "replicate", model = "openai/whisper")
 chat <- cl_chat_describe_images(
   chat,
-  prompt = "Describe this image with focus on social context, emotions, and relevant objects."
+  prompt = "Describe this image with focus on social context, emotions, and relevant objects.",
+  workers = 10
 )
 chat <- cl_chat_process_media(chat)
 
@@ -93,6 +105,68 @@ analysis <- cl_analyze_chat(
 
 analysis
 ```
+
+The importer recognizes WhatsApp attachment markers and classifies audio,
+images, videos, contact cards (`.vcf`), and other files. Unicode filenames are
+supported, while ordinary messages that merely use words such as "attached" or
+"anexado" remain text messages, and filename-like fragments inside URLs or
+email addresses are ignored. Each attachment reference is resolved during
+import and marked as `present`, `missing`, `placeholder`, or `omitted`. With
+`verbose = TRUE`, the import prints those availability counts, then finishes
+with total elapsed time and a breakdown for extraction, reading, parsing,
+attachment resolution, and cache saving. Large imports use up to four parser
+workers automatically on supported systems; pass `workers = 1` for a
+single-process run or an explicit positive integer to control parallelism.
+
+Audio transcription queues only files available after import (plus reusable
+cached transcripts). Missing media references remain recorded in the audio
+manifest and run log, but are not sent to the transcription provider or
+included in the progress denominator.
+
+Media metadata is checkpointed as individual items finish, so interrupting a
+long audio or image run does not discard completed progress. Image descriptions
+run through one temporary `genflow_agent` in bounded queue windows. With
+multiple workers, the first group contains one task per worker; if all of those
+calls fail for the same provider-wide reason, or all hit a rate limit, Chatlens
+caches the errors and stops the remaining queue. Distinct image-specific errors
+do not stop later work. Subsequent windows contain more tasks than workers when
+enough tasks remain, letting the next image start as soon as a worker becomes
+free instead of waiting for the slowest request in every small group. With
+`workers = 1`, metadata is committed after every image. By default Chatlens uses
+up to four concurrent requests; set `workers = 10` (or a different positive
+integer) to choose the limit explicitly.
+Higher concurrency can trigger provider rate limits, so increase it according
+to the service and account being used. If a whole window is rate-limited, the
+queue stops with the errors cached instead of rapidly failing every remaining
+image. Only the main R process updates `image.json` and `image_manifest.json`;
+workers write isolated result checkpoints that are reconciled automatically
+after an interruption.
+
+Additional image runtime options are intentionally limited to the arguments
+Chatlens can prove `genflow::gen_txt()` applies: `add`, `temp`, `reasoning`,
+`tools`, `plugins`, `my_tools`, `timeout_api`, and `null_repeat`. Unknown names
+fail before a cache configuration or provider call is created rather than being
+silently ignored. Provider-specific options also fail early when the selected
+service is known to ignore them (for example, `plugins` outside OpenRouter or
+`reasoning` on Groq). Custom-provider capability flags from `genflow` are
+honored; reasoning and plugins also require their configured payload field.
+When using tools, either pass definitions directly through `tools` or use
+`tools = TRUE` together with `my_tools`.
+
+Image descriptions use three cache policies. The default,
+`cache_mode = "missing"`, reuses each
+active valid description regardless of the requested prompt or model and only
+processes undescribed images. `cache_mode = "configuration"` completes the
+exact requested prompt, service, model, and additional arguments; rerunning it
+resumes only the missing matches. `cache_mode = "force"` creates a new version
+for every image. The compatibility argument `overwrite = FALSE` maps to
+`"missing"`, while `overwrite = TRUE` maps to `"force"`.
+
+Every successful image description is preserved instead of being replaced. The
+current result is written to `image_description`, while
+`image_description_id` identifies the selected cached version. Flat description
+files and legacy image manifests are migrated automatically without deleting
+their originals.
 
 ## Analysis inputs
 
@@ -199,6 +273,24 @@ By default, outputs are cached under `~/.chatlens`, including:
   the raw import; `chat.*` is the latest `chatlens_chat` state)
 
 This makes reruns faster and reproducible.
+
+Image artifacts under each chat cache are organized as:
+
+```text
+image_descriptions/
+  image_manifest.json
+  img_<stable_id>/
+    image.json
+    descriptions/
+      <timestamp>_<service>_<model>_<prompt_hash>.txt
+      <timestamp>_<service>_<model>_<prompt_hash>.json
+```
+
+The `.txt` file is the description itself. Its adjacent `.json` records the
+prompt, provider, model, configuration fingerprint, status, timing, and source
+attachment. `image.json` lists every description attempt for one image. The
+global `image_manifest.json` is a fast, denormalized catalog of all images and
+can be rebuilt from the per-image files after an interrupted write.
 
 ## Safety note ⚠️
 

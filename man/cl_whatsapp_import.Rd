@@ -13,7 +13,8 @@ cl_whatsapp_import(
   verbose = TRUE,
   tz = "UTC",
   date_order = c("dmy", "mdy"),
-  omit_sender_na = TRUE
+  omit_sender_na = TRUE,
+  workers = NULL
 )
 }
 \arguments{
@@ -27,7 +28,8 @@ cl_whatsapp_import(
 
 \item{encoding}{Character encoding to try when reading the chat text}
 
-\item{verbose}{Whether to emit progress messages}
+\item{verbose}{Whether to emit progress messages, including total import time
+and a stage-by-stage timing breakdown}
 
 \item{tz}{Timezone for parsed timestamps}
 
@@ -35,7 +37,23 @@ cl_whatsapp_import(
 
 \item{omit_sender_na}{Logical; when \code{TRUE} (default), drops parsed rows
 whose sender is missing, empty, \code{"NA"}, or \code{"NULL"}.}
+
+\item{workers}{Number of parser workers. \code{NULL} automatically uses up to four
+workers for large imports on systems that support process forking. Use \code{1}
+to force single-process parsing.}
 }
 \description{
 Import a WhatsApp Android ZIP export
+}
+\details{
+WhatsApp attachment markers are used to distinguish actual attachments from
+ordinary messages that merely mention words such as "attached" or
+"anexado". Recognized attachment types include audio, image, video, contact
+cards (\code{.vcf}), and other files. Filename-like fragments inside URLs and
+email addresses are ignored. Each detected reference is resolved against the
+extracted ZIP and marked as present, missing, a placeholder, or omitted.
+
+With \code{verbose = TRUE}, the importer reports attachment availability counts.
+The final console message reports total elapsed time plus setup, extraction,
+chat reading, message parsing, attachment resolution, and cache-save timings.
 }

@@ -9,3 +9,4 @@
 ^\.gitignore$
 ^\.?\.Rcheck$
 ^chatlens_checkpkg\.Rcheck$
+^.*\.[Zz][Ii][Pp]$

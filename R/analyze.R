@@ -112,15 +112,18 @@
   file.path(base_dir, .clh_path_slug(period, "period"), .clh_path_slug(key, "key"))
 }
 
-.clh_format_analysis_text <- function(chat, formatting, text_col = "text_enriched") {
+.clh_format_analysis_text <- function(chat,
+                                      formatting,
+                                      text_col = "text_enriched",
+                                      rows = NULL) {
   formatting <- match.arg(formatting, choices = c("simple", "raw"))
   if (identical(formatting, "simple")) {
-    return(.clh_format_chat_simple(chat, text_col = text_col))
+    return(.clh_format_chat_simple(chat, text_col = text_col, rows = rows))
   }
 
   chat <- .clh_chat_text_snapshot(chat, text_col = text_col)
   if (!text_col %in% names(chat)) text_col <- "text"
-  paste(.clh_format_messages(chat, text_col = text_col), collapse = "\n")
+  paste(.clh_format_messages(chat, text_col = text_col, rows = rows), collapse = "\n")
 }
 
 #' Prepare compact chat inputs for LLM analysis
@@ -184,11 +187,21 @@ cl_prepare_analysis <- function(chat,
   group_keys <- group_keys[keep]
   if (length(groups) == 0) stop("No analysis periods selected")
 
+  # Materialize media-enriched text once after period selection. Formatting
+  # can then index only timestamp, sender, and the chosen text vector without
+  # copying the full chat and all attachment list-columns for every group.
+  chat <- .clh_chat_text_snapshot(chat, text_col = text_col)
+  if (!text_col %in% names(chat)) text_col <- "text"
+
   rows <- vector("list", length(groups))
   for (i in seq_along(groups)) {
     key <- group_keys[i]
-    slice <- .clh_subset_chat(chat, groups[[i]])
-    text <- .clh_format_analysis_text(slice, formatting = formatting, text_col = text_col)
+    text <- .clh_format_analysis_text(
+      chat,
+      formatting = formatting,
+      text_col = text_col,
+      rows = groups[[i]]
+    )
     input_dir <- .clh_analysis_item_dir(base_dir, period = period, key = key)
     input_file <- if (save) file.path(input_dir, "input.txt") else NA_character_
     input_rds <- if (save) file.path(input_dir, "input.rds") else NA_character_

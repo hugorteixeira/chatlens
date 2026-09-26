@@ -4,12 +4,38 @@
   if (is.null(path) || !file.exists(path)) {
     return(list(updated_at = NULL, items = list()))
   }
-  jsonlite::read_json(path, simplifyVector = FALSE)
+  tryCatch(
+    jsonlite::read_json(path, simplifyVector = FALSE),
+    error = function(e) {
+      warning(
+        "Could not read manifest; recoverable cached files will be used instead: ",
+        conditionMessage(e),
+        call. = FALSE
+      )
+      list(updated_at = NULL, items = list())
+    }
+  )
 }
 
 .clh_manifest_save <- function(manifest, path) {
-  jsonlite::write_json(manifest, path, auto_unbox = TRUE, pretty = TRUE)
+  .clh_ensure_dir(dirname(path))
+  tmp <- tempfile(paste0(".", basename(path), "_"), tmpdir = dirname(path))
+  on.exit(if (file.exists(tmp)) unlink(tmp), add = TRUE)
+
+  jsonlite::write_json(manifest, tmp, auto_unbox = TRUE, pretty = TRUE)
+  replaced <- file.rename(tmp, path)
+  if (!isTRUE(replaced)) {
+    copied <- file.copy(tmp, path, overwrite = TRUE)
+    if (!isTRUE(copied)) stop("Could not save manifest: ", path)
+    unlink(tmp)
+  }
   invisible(TRUE)
+}
+
+.clh_manifest_checkpoint <- function(manifest, path) {
+  manifest$updated_at <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+  .clh_manifest_save(manifest, path)
+  manifest
 }
 
 .clh_runs_dir <- function(chat_key, cache_dir = NULL) {

@@ -67,6 +67,13 @@ Default chat cache layout:
     manifests/
     runs/
     analysis/
+    image_descriptions/
+      image_manifest.json
+      img_<stable_id>/
+        image.json
+        descriptions/
+          <description_id>.txt
+          <description_id>.json
 ```
 
 `chat_original.*` is the raw import snapshot. `chat.*` is the latest
@@ -85,6 +92,30 @@ truth.
 `cl_chat_process_media()` creates or updates `text_enriched` with media
 annotations. Media processing should keep helpful error messages in console
 output and cached metadata; silent failures are not acceptable.
+
+Image description artifacts are versioned. Do not replace or delete an older
+successful description merely because the prompt, service, or model changes.
+Each image owns `image.json`, each attempt owns a `.json` artifact, successful
+attempts also own the adjacent `.txt`, and the global image manifest is a
+rebuildable index. Keep the three cache policies distinct: `missing`,
+`configuration`, and `force`.
+
+Image provider calls use one ephemeral `genflow_agent` with bounded parallel
+workers. Keep `workers` operational: it must not affect the configuration
+fingerprint. Workers may write only their unique result checkpoints; the main R
+process remains the sole writer of per-image metadata and the global manifest.
+Queue windows should contain several tasks per worker so the dynamic scheduler
+keeps fast workers occupied. Validate additional runtime arguments before cache
+configuration/staging; never fingerprint an option that `genflow` will ignore.
+Preserve worker/checkpoint error details and validate task IDs before attaching
+results to image records.
+
+Validate the live `genflow` namespace contract before reading, migrating, or
+writing image-cache state. A package version read from disk is not sufficient:
+an R session can retain an older loaded namespace after an in-session install.
+Require the explicit batch arguments used by Chatlens and give restart/reinstall
+guidance before staging attempts; do not silently fall back to a legacy serial
+path or try to unload an imported namespace automatically.
 
 When media functions change the chat, keep `save_chat = TRUE` by default and
 update `chat.rds` plus `chat.txt`.

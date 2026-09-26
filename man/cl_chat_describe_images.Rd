@@ -13,6 +13,8 @@ cl_chat_describe_images(
   overwrite = FALSE,
   verbose = TRUE,
   save_chat = TRUE,
+  cache_mode = NULL,
+  workers = NULL,
   ...
 )
 }
@@ -28,15 +30,70 @@ cl_chat_describe_images(
 \item{cache_dir}{Optional cache directory. When \code{NULL}, uses the chat's
 stored cache location or \verb{~/.chatlens}.}
 
-\item{overwrite}{Reprocess items even if cached output exists}
+\item{overwrite}{Create a new description for every image even when a valid
+cached description exists. Previous descriptions are preserved as separate
+versioned artifacts. This is a compatibility shortcut for
+\code{cache_mode = "force"}; \code{FALSE} maps to \code{cache_mode = "missing"}.}
 
 \item{verbose}{Whether to emit progress messages}
 
 \item{save_chat}{Save the current chat state in cache as \code{chat.rds} plus a
 mirrored \code{chat.txt} transcript}
 
-\item{...}{Additional arguments passed to \code{\link[genflow:gen_txt]{genflow::gen_txt()}}}
+\item{cache_mode}{Optional cache policy. \code{"missing"} reuses any active valid
+description and processes only undescribed images. \code{"configuration"}
+reuses descriptions made with the requested prompt, service, model, and
+additional arguments, processing only images missing that exact
+configuration. \code{"force"} creates a new version for every image. When
+\code{NULL}, the policy is derived from \code{overwrite}.}
+
+\item{workers}{Maximum number of image requests to run simultaneously.
+\code{NULL} uses up to four workers. Explicit values are capped by the number
+of pending images; higher values may trigger provider rate limits. Parallel
+provider calls run in independent PSOCK processes rather than forked copies
+of the current R session.}
+
+\item{...}{Supported \code{\link[genflow:gen_txt]{genflow::gen_txt()}} runtime arguments: \code{add}, \code{temp},
+\code{reasoning}, \code{tools}, \code{plugins}, \code{my_tools}, \code{timeout_api}, and
+\code{null_repeat}. Unknown names fail before cache metadata is created so a
+configuration never claims to have used an ignored option. Provider-bound
+options are rejected when the selected service is known to ignore them;
+for example, \code{plugins} are currently limited to OpenRouter among built-in
+providers. Custom-provider capability flags are honored; reasoning and
+plugin support also require their configured payload field. \code{tools = TRUE}
+requires definitions in \code{my_tools}; definitions can instead be supplied
+directly as a list/JSON value in \code{tools}.}
 }
 \description{
 Describe image attachments
+}
+\details{
+Before reading or changing the image cache, the function verifies that the
+live \code{genflow} namespace supports the required parallel batch arguments. If
+\code{genflow} was updated while the current R session was open, the error reports
+both the loaded and installed versions and asks for a complete session
+restart instead of creating failed image attempts.
+
+Parallel requests explicitly use genflow's PSOCK backend. This avoids
+inheriting initialized \code{curl}/\code{httr} native state from RStudio, which can make
+forked workers crash before returning a result or writing a checkpoint.
+
+Each image has its own \code{image.json} metadata file and a \verb{descriptions/}
+directory containing one \code{.json} provenance file per attempt plus a \code{.txt}
+result for each successful attempt. A global \code{image_manifest.json} indexes
+those records. All artifacts are written atomically and checkpointed after
+each attempt. The first concurrent group contains at most one task per
+worker, providing an early circuit breaker for uniform provider or
+configuration failures. When enough tasks remain, later images are processed
+in bounded queue windows with more queued tasks than workers, so fast workers
+do not wait for the slowest request after every small group. Serial runs
+commit metadata after every image. Only the main R process writes image
+metadata and the global manifest. Workers also write a unique per-attempt
+checkpoint so completed calls can be recovered if a batch is interrupted.
+The global index can be rebuilt from the per-image metadata after an
+interruption. Flat \code{.txt}
+files and the legacy root image manifest are migrated automatically without
+deleting the originals. The returned chat stores the selected text in
+\code{image_description}/\code{image_descriptions} and its artifact id in
+\code{image_description_id}/\code{image_description_ids}.
 }
